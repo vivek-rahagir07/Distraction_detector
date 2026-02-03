@@ -53,10 +53,10 @@ class FocusSentinel {
         });
 
         this.faceMesh.setOptions({
-            maxNumFaces: 2,
+            maxNumFaces: 10,
             refineLandmarks: true,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
         });
 
         this.initObjectDetector();
@@ -210,21 +210,35 @@ class FocusSentinel {
         this.canvasCtx.drawImage(results.image, 0, 0, this.canvasElement.width, this.canvasElement.height);
 
         this.framesActive++;
+        let anyoneDistracted = false;
 
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-            const landmarks = results.multiFaceLandmarks[0];
+            results.multiFaceLandmarks.forEach((landmarks, index) => {
+                // Visualize mesh
+                drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#00f3ff15', lineWidth: 0.5 });
+                drawConnectors(this.canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
+                drawConnectors(this.canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
+                drawConnectors(this.canvasCtx, landmarks, FACEMESH_LIPS, { color: '#00f3ff', lineWidth: 1 });
 
-            drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#00f3ff15', lineWidth: 0.5 });
-            drawConnectors(this.canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
-            drawConnectors(this.canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
-            drawConnectors(this.canvasCtx, landmarks, FACEMESH_LIPS, { color: '#00f3ff', lineWidth: 1 });
+                const isLookingAway = this.checkLookingAway(landmarks);
 
-            const isLookingAway = this.checkLookingAway(landmarks);
-            const multiplePeople = results.multiFaceLandmarks.length > 1;
+                // Draw label above head
+                const topLandmark = landmarks[10];
+                const x = topLandmark.x * this.canvasElement.width;
+                const y = topLandmark.y * this.canvasElement.height - 20;
 
-            if (isLookingAway || multiplePeople) {
-                const reason = isLookingAway ? "GAZE_DEV" : "MULTI_ENT";
-                this.handleViolation(reason);
+                this.canvasCtx.fillStyle = isLookingAway ? '#ef4444' : '#22c55e';
+                this.canvasCtx.font = 'bold 12px Inter';
+                this.canvasCtx.textAlign = 'center';
+                this.canvasCtx.fillText(isLookingAway ? 'DISTRACTED' : 'FOCUSED', x, y);
+
+                if (isLookingAway) {
+                    anyoneDistracted = true;
+                }
+            });
+
+            if (anyoneDistracted) {
+                this.handleViolation("GAZE_DEV");
                 this.updateUIForDistraction(true);
             } else {
                 this.framesFocused++;
@@ -249,7 +263,10 @@ class FocusSentinel {
         const chin = landmarks[152];
         const faceHeight = chin.y - forehead.y;
         const noseRelativeY = (nose.y - forehead.y) / faceHeight;
-        return (noseRelativeX < 0.35 || noseRelativeX > 0.65 || noseRelativeY < 0.35 || noseRelativeY > 0.75);
+
+        // Relaxed thresholds for "natural" movement
+        // X: [0.25, 0.75], Y: [0.2, 0.9]
+        return (noseRelativeX < 0.25 || noseRelativeX > 0.75 || noseRelativeY < 0.2 || noseRelativeY > 0.9);
     }
 
     initAudio() {
