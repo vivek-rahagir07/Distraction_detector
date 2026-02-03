@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyGuard AI - Distraction & Exam Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Solutions -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            aspect-ratio: 4/3;
+            background: #1e293b;
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        #input_video {
+            display: none;
+        }
+
+        #output_canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .status-badge {
+            transition: all 0.3s ease;
+        }
+
+        .log-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .log-container::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        /* Permission Overlay */
+        #setupOverlay {
+            backdrop-filter: blur(8px);
+            z-index: 50;
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <!-- Camera Access Request Overlay -->
+    <div id="setupOverlay" class="fixed inset-0 bg-slate-900/80 flex items-center justify-center p-4">
+        <div class="bg-white max-w-md w-full rounded-2xl p-8 shadow-2xl text-center">
+            <div class="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Camera Access Required</h2>
+            <p class="text-slate-500 mb-8 text-sm leading-relaxed">
+                StudyGuard AI uses your camera to monitor focus and maintain exam integrity locally. No video data ever leaves your device.
+            </p>
+            <button id="requestPermissionBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg hover:shadow-indigo-200 active:scale-[0.98]">
+                Enable Camera & Start
+            </button>
+            <p id="errorMessage" class="hidden mt-4 text-red-500 text-sm font-medium"></p>
+        </div>
+    </div>
+
+    <div class="min-h-screen p-4 md:p-8">
+        <!-- Header -->
+        <header class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-indigo-600 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    StudyGuard AI
+                </h1>
+                <p class="text-slate-500">Intelligent focus and exam integrity monitoring</p>
+            </div>
+            
+            <div class="flex gap-4">
+                <button id="stopBtn" class="hidden bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-full font-semibold transition flex items-center gap-2">
+                    <span>End Session</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left: Video Feed -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="font-semibold text-lg">Live Feed</h2>
+                        <div id="statusBadge" class="status-badge bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-sm font-medium">
+                            System Offline
+                        </div>
+                    </div>
+                    
+                    <div class="video-container">
+                        <video id="input_video" playsinline></video>
+                        <canvas id="output_canvas"></canvas>
+                        
+                        <!-- Overlay for Alerts -->
+                        <div id="alertOverlay" class="absolute inset-0 bg-red-500/20 pointer-events-none opacity-0 transition-opacity duration-300 flex items-center justify-center">
+                            <div class="bg-red-600 text-white px-6 py-3 rounded-lg font-bold shadow-2xl uppercase tracking-wider animate-bounce text-center">
+                                Distraction Detected
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                            <p class="text-xs text-slate-500 uppercase font-bold mb-1">Attention Score</p>
+                            <p id="attentionScore" class="text-2xl font-bold text-indigo-600">0%</p>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                            <p class="text-xs text-slate-500 uppercase font-bold mb-1">Time Elapsed</p>
+                            <p id="timer" class="text-2xl font-bold">00:00</p>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                            <p class="text-xs text-slate-500 uppercase font-bold mb-1">Violations</p>
+                            <p id="violationCount" class="text-2xl font-bold text-red-500">0</p>
+                        </div>
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                            <p class="text-xs text-slate-500 uppercase font-bold mb-1">Focus State</p>
+                            <p id="focusState" class="text-sm font-bold truncate">N/A</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Session Logs -->
+            <div class="lg:col-span-1">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col">
+                    <h2 class="font-semibold text-lg mb-4 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Incident Log
+                    </h2>
+                    
+                    <div id="logContainer" class="log-container space-y-3 overflow-y-auto flex-grow max-h-[500px] pr-2">
+                        <div class="text-center text-slate-400 py-8 italic text-sm">
+                            Logs will appear here during session
+                        </div>
+                    </div>
+                    
+                    <div class="mt-6 pt-6 border-t border-slate-100">
+                        <button id="downloadLog" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition text-sm">
+                            Export Session Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- UI Interaction Script -->
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusBadge = document.getElementById('statusBadge');
+        const alertOverlay = document.getElementById('alertOverlay');
+        const setupOverlay = document.getElementById('setupOverlay');
+        const requestBtn = document.getElementById('requestPermissionBtn');
+        const errorMsg = document.getElementById('errorMessage');
+        const stopBtn = document.getElementById('stopBtn');
+        const logContainer = document.getElementById('logContainer');
+        
+        // Monitoring variables
+        let isActive = false;
+        let violations = 0;
+        let startTime = null;
+        let timerInterval = null;
+        let framesActive = 0;
+        let framesFocused = 0;
+
+        // Initialize Face Mesh
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+
+        faceMesh.setOptions({
+            maxNumFaces: 2,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if(isActive) await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            framesActive++;
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
+                
+                const isLookingAway = checkLookingAway(landmarks);
+                const multiplePeople = results.multiFaceLandmarks.length > 1;
+
+                if (isLookingAway || multiplePeople) {
+                    handleViolation(isLookingAway ? "Looking Away" : "Second Person Detected");
+                    updateStatus("Warning", "bg-yellow-500 text-white");
+                    alertOverlay.style.opacity = "1";
+                    document.getElementById('focusState').innerText = "Distracted";
+                    document.getElementById('focusState').className = "text-sm font-bold text-red-500";
+                } else {
+                    framesFocused++;
+                    updateStatus("Monitoring", "bg-green-500 text-white");
+                    alertOverlay.style.opacity = "0";
+                    document.getElementById('focusState').innerText = "Focused";
+                    document.getElementById('focusState').className = "text-sm font-bold text-green-500";
+                }
+            } else {
+                handleViolation("No Face Detected");
+                updateStatus("No User Found", "bg-red-500 text-white");
+                alertOverlay.style.opacity = "1";
+                document.getElementById('focusState').innerText = "Missing";
+            }
+
+            updateMetrics();
+            canvasCtx.restore();
+        }
+
+        function checkLookingAway(landmarks) {
+            const leftEye = landmarks[33];
+            const rightEye = landmarks[263];
+            const nose = landmarks[1];
+            const eyeDist = rightEye.x - leftEye.x;
+            const noseRelativeX = (nose.x - leftEye.x) / eyeDist;
+            const forehead = landmarks[10];
+            const chin = landmarks[152];
+            const faceHeight = chin.y - forehead.y;
+            const noseRelativeY = (nose.y - forehead.y) / faceHeight;
+            return (noseRelativeX < 0.35 || noseRelativeX > 0.65 || noseRelativeY < 0.35 || noseRelativeY > 0.75);
+        }
+
+        let lastViolationTime = 0;
+        function handleViolation(type) {
+            const now = Date.now();
+            if (now - lastViolationTime > 3000) {
+                violations++;
+                document.getElementById('violationCount').innerText = violations;
+                addLog(type);
+                lastViolationTime = now;
+            }
+        }
+
+        function addLog(message) {
+            if (logContainer.innerText.includes("Logs will appear")) logContainer.innerHTML = "";
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const logEntry = document.createElement('div');
+            logEntry.className = "flex items-start gap-3 p-3 bg-red-50 border-l-4 border-red-400 rounded-r-lg";
+            logEntry.innerHTML = `
+                <div class="flex-grow">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs font-bold text-red-600 uppercase">Violation</span>
+                        <span class="text-[10px] text-slate-400 font-mono">${timeStr}</span>
+                    </div>
+                    <p class="text-sm text-slate-700">${message}</p>
+                </div>
+            `;
+            logContainer.prepend(logEntry);
+        }
+
+        function updateMetrics() {
+            const ratio = (framesFocused / framesActive) * 100;
+            document.getElementById('attentionScore').innerText = Math.round(ratio) + "%";
+        }
+
+        function updateStatus(text, classes) {
+            statusBadge.innerText = text;
+            statusBadge.className = `status-badge px-3 py-1 rounded-full text-sm font-medium ${classes}`;
+        }
+
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                const diff = Date.now() - startTime;
+                const min = Math.floor(diff / 60000).toString().padStart(2, '0');
+                const sec = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+                document.getElementById('timer').innerText = `${min}:${sec}`;
+            }, 1000);
+        }
+
+        // Camera Permission Request
+        requestBtn.addEventListener('click', async () => {
+            requestBtn.innerText = "Initializing AI...";
+            requestBtn.disabled = true;
+            
+            try {
+                // Initial check for permissions
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                // If we get here, camera is allowed. Stop stream immediately and let MediaPipe Camera class handle it.
+                stream.getTracks().forEach(track => track.stop());
+
+                await camera.start();
+                isActive = true;
+                setupOverlay.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                updateStatus("Monitoring", "bg-green-500 text-white");
+                startTimer();
+                
+                canvasElement.width = videoElement.videoWidth || 640;
+                canvasElement.height = videoElement.videoHeight || 480;
+            } catch (err) {
+                console.error("Camera failed:", err);
+                errorMsg.innerText = "Camera access denied or device not found. Please enable permissions and refresh.";
+                errorMsg.classList.remove('hidden');
+                requestBtn.innerText = "Enable Camera & Start";
+                requestBtn.disabled = false;
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            isActive = false;
+            camera.stop();
+            clearInterval(timerInterval);
+            location.reload(); // Quick reset for the demo app
+        });
+
+        document.getElementById('downloadLog').addEventListener('click', () => {
+            const sessionData = {
+                duration: document.getElementById('timer').innerText,
+                violations: violations,
+                score: document.getElementById('attentionScore').innerText,
+                timestamp: new Date().toISOString()
+            };
+            const blob = new Blob([JSON.stringify(sessionData, null, 2)], {type : 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `StudyGuard_Session_${Date.now()}.json`;
+            a.click();
+        });
+    </script>
+</body>
+</html>
