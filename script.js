@@ -210,63 +210,142 @@ class FocusSentinel {
         this.canvasCtx.drawImage(results.image, 0, 0, this.canvasElement.width, this.canvasElement.height);
 
         this.framesActive++;
-        let anyoneDistracted = false;
+        let distractedCount = 0;
+        const faceCount = results.multiFaceLandmarks ? results.multiFaceLandmarks.length : 0;
 
-        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        if (faceCount > 0) {
             results.multiFaceLandmarks.forEach((landmarks, index) => {
-                // Visualize mesh
-                drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#00f3ff15', lineWidth: 0.5 });
-                drawConnectors(this.canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
-                drawConnectors(this.canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#ff00c1', lineWidth: 1.5 });
-                drawConnectors(this.canvasCtx, landmarks, FACEMESH_LIPS, { color: '#00f3ff', lineWidth: 1 });
-
                 const isLookingAway = this.checkLookingAway(landmarks);
+                if (isLookingAway) distractedCount++;
+
+                const color = isLookingAway ? '#ef4444' : '#22c55e';
+
+                // Draw futuristic mesh (subtle)
+                drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: `${color}10`, lineWidth: 0.5 });
+
+                // Draw brackets around face
+                this.drawPersonBrackets(landmarks, color, isLookingAway);
 
                 // Draw label above head
                 const topLandmark = landmarks[10];
                 const x = topLandmark.x * this.canvasElement.width;
-                const y = topLandmark.y * this.canvasElement.height - 20;
+                const y = topLandmark.y * this.canvasElement.height - 40;
 
-                this.canvasCtx.fillStyle = isLookingAway ? '#ef4444' : '#22c55e';
-                this.canvasCtx.font = 'bold 12px Inter';
+                this.canvasCtx.fillStyle = color;
+                this.canvasCtx.font = 'bold 10px Orbitron';
                 this.canvasCtx.textAlign = 'center';
-                this.canvasCtx.fillText(isLookingAway ? 'DISTRACTED' : 'FOCUSED', x, y);
+                this.canvasCtx.fillText(`GUARD_ID: 00${index + 1}`, x, y - 12);
 
-                if (isLookingAway) {
-                    anyoneDistracted = true;
-                }
+                this.canvasCtx.font = 'bold 14px Rajdhani';
+                this.canvasCtx.fillText(isLookingAway ? '⚠ DISTRACTED' : '✓ FOCUSED', x, y);
             });
 
-            if (anyoneDistracted) {
+            if (distractedCount > 0) {
                 this.handleViolation("GAZE_DEV");
-                this.updateUIForDistraction(true);
+                this.updateUIForDistraction(true, distractedCount > 1 ? "MULTIPLE_DISTRACTIONS" : "GAZE_DEVIATION");
             } else {
                 this.framesFocused++;
                 this.updateUIForDistraction(false);
             }
+
+            // Multi-person warning (non-violation but logged)
+            if (faceCount > 1 && this.framesActive % 100 === 0) {
+                this.addLog(`MULTIPLE_IDENTITIES: ${faceCount} detected`, "info");
+            }
         } else {
             this.handleViolation("SIG_LOST");
-            this.updateUIForDistraction(true, "LOST");
+            this.updateUIForDistraction(true, "SIGNAL_LOST");
         }
 
         this.updateMetrics();
         this.canvasCtx.restore();
     }
 
+    drawPersonBrackets(landmarks, color, isDistracted) {
+        // Calculate bounding box from landmarks
+        let minX = 1, minY = 1, maxX = 0, maxY = 0;
+        landmarks.forEach(l => {
+            minX = Math.min(minX, l.x);
+            minY = Math.min(minY, l.y);
+            maxX = Math.max(maxX, l.x);
+            maxY = Math.max(maxY, l.y);
+        });
+
+        const padding = 0.05;
+        const w = this.canvasElement.width;
+        const h = this.canvasElement.height;
+
+        const left = (minX - padding) * w;
+        const top = (minY - padding) * h;
+        const right = (maxX + padding) * w;
+        const bottom = (maxY + padding) * h;
+        const width = right - left;
+        const height = bottom - top;
+        const cornerSize = width * 0.2;
+
+        this.canvasCtx.strokeStyle = color;
+        this.canvasCtx.lineWidth = isDistracted ? 3 : 2;
+        this.canvasCtx.beginPath();
+
+        // Top-Left
+        this.canvasCtx.moveTo(left, top + cornerSize);
+        this.canvasCtx.lineTo(left, top);
+        this.canvasCtx.lineTo(left + cornerSize, top);
+
+        // Top-Right
+        this.canvasCtx.moveTo(right - cornerSize, top);
+        this.canvasCtx.lineTo(right, top);
+        this.canvasCtx.lineTo(right, top + cornerSize);
+
+        // Bottom-Right
+        this.canvasCtx.moveTo(right, bottom - cornerSize);
+        this.canvasCtx.lineTo(right, bottom);
+        this.canvasCtx.lineTo(right - cornerSize, bottom);
+
+        // Bottom-Left
+        this.canvasCtx.moveTo(left + cornerSize, bottom);
+        this.canvasCtx.lineTo(left, bottom);
+        this.canvasCtx.lineTo(left, bottom - cornerSize);
+
+        this.canvasCtx.stroke();
+
+        // Subtle glow effect
+        if (isDistracted) {
+            this.canvasCtx.shadowBlur = 15;
+            this.canvasCtx.shadowColor = color;
+            this.canvasCtx.stroke();
+            this.canvasCtx.shadowBlur = 0;
+        }
+    }
+
     checkLookingAway(landmarks) {
         const leftEye = landmarks[33];
         const rightEye = landmarks[263];
         const nose = landmarks[1];
+
+        // Horizontal Ratio (X)
+        // 0 = Looking far left, 1 = Looking far right
         const eyeDist = rightEye.x - leftEye.x;
         const noseRelativeX = (nose.x - leftEye.x) / eyeDist;
+
+        // Vertical Ratio (Y)
         const forehead = landmarks[10];
         const chin = landmarks[152];
         const faceHeight = chin.y - forehead.y;
         const noseRelativeY = (nose.y - forehead.y) / faceHeight;
 
-        // Relaxed thresholds for "natural" movement
-        // X: [0.25, 0.75], Y: [0.2, 0.9]
-        return (noseRelativeX < 0.25 || noseRelativeX > 0.75 || noseRelativeY < 0.2 || noseRelativeY > 0.9);
+        // Depth Check (Z) - detects extreme head turn
+        const zRatio = Math.abs(leftEye.z - rightEye.z) / eyeDist;
+
+        // Thresholds:
+        // X: [0.35, 0.65] - tighter horizontal focus
+        // Y: [0.35, 0.65] - tighter vertical focus
+        // Z: < 0.35 - head rotation
+        const isXAway = noseRelativeX < 0.35 || noseRelativeX > 0.65;
+        const isYAway = noseRelativeY < 0.35 || noseRelativeY > 0.65;
+        const isZAway = zRatio > 0.35;
+
+        return isXAway || isYAway || isZAway;
     }
 
     initAudio() {
@@ -321,14 +400,16 @@ class FocusSentinel {
             this.videoFrame.classList.add('neon-border-red');
             this.videoFrame.classList.remove('neon-border-green', 'neon-border-cyan');
             this.focusStateEl.innerText = customState || "INTEGRITY_COMPROMISED";
-            this.focusStateEl.className = "text-xl font-bold text-red-500 uppercase glow-text-red";
+            this.focusStateEl.style.color = '#ef4444';
+            this.focusStateEl.className = "text-xl font-bold uppercase glow-text-red animate-pulse";
         } else {
-            this.updateStatus("SECURED", "border-red-500 text-red-400 bg-red-500/10", "bg-red-500");
+            this.updateStatus("SECURED", "border-emerald-500 text-emerald-400 bg-emerald-500/10", "bg-emerald-500");
             this.alertOverlay.style.opacity = "0";
             this.videoFrame.classList.add('neon-border-green');
             this.videoFrame.classList.remove('neon-border-red', 'neon-border-cyan');
             this.focusStateEl.innerText = "COMPLIANT";
-            this.focusStateEl.className = "text-xl font-bold text-green-400 uppercase";
+            this.focusStateEl.style.color = '#10b981';
+            this.focusStateEl.className = "text-xl font-bold uppercase";
         }
     }
 
@@ -354,17 +435,30 @@ class FocusSentinel {
     updateMetrics() {
         const ratio = this.framesActive > 0 ? (this.framesFocused / this.framesActive) * 100 : 0;
         this.attentionScoreEl.innerText = Math.round(ratio) + "%";
-        if (this.framesActive % 30 === 0) {
+
+        // Dynamic color for Attention Score
+        if (ratio > 85) this.attentionScoreEl.style.color = '#10b981';
+        else if (ratio > 60) this.attentionScoreEl.style.color = '#34d399';
+        else if (ratio > 40) this.attentionScoreEl.style.color = '#fbbf24';
+        else this.attentionScoreEl.style.color = '#ef4444';
+
+        if (this.framesActive % 20 === 0) {
             this.chart.data.datasets[0].data.shift();
             this.chart.data.datasets[0].data.push(ratio);
             this.chart.update('none');
+
             const consistency = Math.round(ratio);
-            document.getElementById('consistencyScore').innerText = consistency + "%";
-            document.getElementById('consistencyBar').style.width = consistency + "%";
+            const scoreLabel = document.getElementById('consistencyScore');
+            const scoreBar = document.getElementById('consistencyBar');
+
+            scoreLabel.innerText = consistency + "%";
+            scoreBar.style.width = consistency + "%";
+
+            // Industrial color mapping for bar
+            if (consistency > 80) scoreBar.className = "bg-emerald-500 h-full transition-all duration-500";
+            else if (consistency > 50) scoreBar.className = "bg-amber-500 h-full transition-all duration-500";
+            else scoreBar.className = "bg-red-500 h-full transition-all duration-500";
         }
-        if (ratio > 80) this.attentionScoreEl.style.color = 'var(--neon-green)';
-        else if (ratio > 50) this.attentionScoreEl.style.color = 'var(--neon-cyan)';
-        else this.attentionScoreEl.style.color = 'var(--neon-red)';
     }
 
     startTimer() {
