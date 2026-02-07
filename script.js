@@ -11,6 +11,8 @@ class FocusSentinel {
         this.videoFrame = document.getElementById('videoFrame');
         this.requestBtn = document.getElementById('requestPermissionBtn');
         this.stopBtn = document.getElementById('stopBtn');
+        this.audioVisualizer = document.getElementById('audio_visualizer');
+        this.audioCanvasCtx = this.audioVisualizer ? this.audioVisualizer.getContext('2d') : null;
 
         // METRICS_UI
         this.logContainer = document.getElementById('logContainer');
@@ -46,6 +48,8 @@ class FocusSentinel {
 
         // AUDIO_CTX
         this.audioCtx = null;
+        this.analyser = null;
+        this.lastObjectResults = null;
 
         // MEDIAPIPE_INIT
         this.faceMesh = new FaceMesh({
@@ -93,12 +97,13 @@ class FocusSentinel {
     }
 
     onObjectResults(results) {
+        this.lastObjectResults = results;
         if (!results.detections) return;
 
-        const forbidden = ['cell phone', 'laptop', 'tablet', 'book'];
+        const forbidden = ['cell phone', 'laptop', 'tablet', 'book', 'person']; // person is for multi-person logic if needed
         for (const detection of results.detections) {
             const category = detection.categories[0].categoryName;
-            if (forbidden.includes(category)) {
+            if (forbidden.includes(category) && category !== 'person') {
                 this.handleViolation(`UNAUTHORIZED_DEVICE: ${category.toUpperCase()}`);
             }
         }
@@ -115,7 +120,63 @@ class FocusSentinel {
         document.getElementById('downloadLog').addEventListener('click', () => this.downloadSessionData());
 
         this.initChart();
-        console.log("SYS_INIT_OK");
+        this.runDiagnostics();
+        console.log("SYS_INIT_OK_V3.0");
+    }
+
+    async runDiagnostics() {
+        const diagStatus = document.getElementById('diagStatus');
+        const checkItems = {
+            camera: document.getElementById('check-camera'),
+            mic: document.getElementById('check-mic'),
+            models: document.getElementById('check-models'),
+            network: document.getElementById('check-network')
+        };
+
+        const updateItem = (id, success) => {
+            const el = checkItems[id];
+            if (!el) return;
+            el.className = `flex items-center gap-2 ${success ? 'diag-item-ok' : 'diag-item-err'}`;
+        };
+
+        diagStatus.innerText = "INITIALIZING...";
+
+        // 1. Network Check
+        updateItem('network', navigator.onLine);
+        window.addEventListener('online', () => updateItem('network', true));
+        window.addEventListener('offline', () => updateItem('network', false));
+
+        // 2. Camera Check
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            stream.getTracks().forEach(t => t.stop());
+            updateItem('camera', true);
+        } catch { updateItem('camera', false); }
+
+        // 3. Mic Check
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(t => t.stop());
+            updateItem('mic', true);
+        } catch { updateItem('mic', false); }
+
+        // 4. Neural Engines (Wait for ObjectDetector)
+        let modelRetries = 0;
+        const modelCheck = setInterval(() => {
+            if (this.objectDetector) {
+                updateItem('models', true);
+                diagStatus.innerText = "SYSTEM_READY";
+                diagStatus.className = "text-emerald-500 animate-none";
+                this.requestBtn.disabled = false;
+                this.requestBtn.classList.remove('opacity-50');
+                clearInterval(modelCheck);
+            } else if (modelRetries > 10) {
+                updateItem('models', false);
+                diagStatus.innerText = "MODEL_ERROR";
+                clearInterval(modelCheck);
+            }
+            modelRetries++;
+        }, 1000);
     }
 
     initChart() {
@@ -170,6 +231,11 @@ class FocusSentinel {
             this.canvasElement.width = this.videoElement.videoWidth || 640;
             this.canvasElement.height = this.videoElement.videoHeight || 480;
 
+            if (this.audioVisualizer) {
+                this.audioVisualizer.width = 600;
+                this.audioVisualizer.height = 100;
+            }
+
             this.addLog("PROTOCOLS_ENGAGED", "success");
             this.startPomo(); // Start monitoring immediately
         } catch (err) {
@@ -187,21 +253,48 @@ class FocusSentinel {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             this.initAudio();
             const source = this.audioCtx.createMediaStreamSource(stream);
-            const analyser = this.audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
+            this.analyser = this.audioCtx.createAnalyser();
+            this.analyser.fftSize = 512;
+            source.connect(this.analyser);
 
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
             this.audioInterval = setInterval(() => {
-                analyser.getByteFrequencyData(dataArray);
+                this.analyser.getByteFrequencyData(dataArray);
                 const average = dataArray.reduce((p, c) => p + c, 0) / dataArray.length;
-                if (average > 40) { // Threshold for talking/noise
+                if (average > 45) { // Threshold for talking/noise
                     this.handleViolation("VOCAL_DETECTION");
                 }
-            }, 1000);
+            }, 500);
         } catch (err) {
             console.warn("Audio monitoring disabled: ", err);
         }
+    }
+
+    drawAudioWave() {
+        if (!this.analyser || !this.audioCanvasCtx) return;
+        const ctx = this.audioCanvasCtx;
+        const bufferLength = this.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        this.analyser.getByteTimeDomainData(dataArray);
+
+        ctx.clearRect(0, 0, this.audioVisualizer.width, this.audioVisualizer.height);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#00f3ff';
+        ctx.beginPath();
+
+        const sliceWidth = this.audioVisualizer.width * 1.0 / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = v * this.audioVisualizer.height / 2;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            x += sliceWidth;
+        }
+
+        ctx.lineTo(this.audioVisualizer.width, this.audioVisualizer.height / 2);
+        ctx.stroke();
     }
 
     onResults(results) {
@@ -210,6 +303,19 @@ class FocusSentinel {
         this.canvasCtx.drawImage(results.image, 0, 0, this.canvasElement.width, this.canvasElement.height);
 
         this.framesActive++;
+        this.drawAudioWave();
+
+        // 1. Draw Object Detections
+        if (this.lastObjectResults && this.lastObjectResults.detections) {
+            this.lastObjectResults.detections.forEach(detection => {
+                const category = detection.categories[0].categoryName;
+                if (['cell phone', 'laptop', 'tablet', 'book'].includes(category)) {
+                    this.drawObjectBracket(detection);
+                }
+            });
+        }
+
+        // 2. Face Analytics
         let distractedCount = 0;
         const faceCount = results.multiFaceLandmarks ? results.multiFaceLandmarks.length : 0;
 
@@ -219,42 +325,9 @@ class FocusSentinel {
                 if (isLookingAway) distractedCount++;
 
                 const color = isLookingAway ? '#ef4444' : '#22c55e';
-
-                // Draw futuristic mesh (subtle)
                 drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: `${color}10`, lineWidth: 0.5 });
-
-                // Draw brackets around face
                 this.drawPersonBrackets(landmarks, color, isLookingAway);
-
-                // Draw label above head
-                const topLandmark = landmarks[10];
-                const x = topLandmark.x * this.canvasElement.width;
-                const y = topLandmark.y * this.canvasElement.height - 60;
-
-                // ID Tag
-                this.canvasCtx.fillStyle = color;
-                this.canvasCtx.font = 'bold 10px Orbitron';
-                this.canvasCtx.textAlign = 'center';
-                this.canvasCtx.fillText(`AGENT_00${index + 1}`, x, y - 10);
-
-                // Status Badge
-                this.canvasCtx.font = 'bold 14px Rajdhani';
-                if (isLookingAway) {
-                    // Draw Alert Badge
-                    const boxW = 120;
-                    const boxH = 24;
-                    this.canvasCtx.fillStyle = '#ef4444';
-                    this.canvasCtx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
-                    this.canvasCtx.fillStyle = '#ffffff';
-                    this.canvasCtx.fillText('⚠ FOCUS BROKEN', x, y + 5);
-
-                    // Add secondary detail
-                    this.canvasCtx.font = 'bold 8px Orbitron';
-                    this.canvasCtx.fillStyle = '#ef4444';
-                    this.canvasCtx.fillText('GAZE_DEVIATION_DETECTED', x, y + 25);
-                } else {
-                    this.canvasCtx.fillText('✓ SECURED', x, y + 5);
-                }
+                this.drawPersonLabels(landmarks, index, isLookingAway, color);
             });
 
             if (distractedCount > 0) {
@@ -264,11 +337,6 @@ class FocusSentinel {
                 this.framesFocused++;
                 this.updateUIForDistraction(false);
             }
-
-            // Multi-person warning (non-violation but logged)
-            if (faceCount > 1 && this.framesActive % 100 === 0) {
-                this.addLog(`MULTIPLE_IDENTITIES: ${faceCount} detected`, "info");
-            }
         } else {
             this.handleViolation("SIG_LOST");
             this.updateUIForDistraction(true, "SIGNAL_LOST");
@@ -276,6 +344,44 @@ class FocusSentinel {
 
         this.updateMetrics();
         this.canvasCtx.restore();
+    }
+
+    drawObjectBracket(detection) {
+        const { originX, originY, width, height } = detection.boundingBox;
+        const ctx = this.canvasCtx;
+
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(originX, originY, width, height);
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 10px Orbitron';
+        ctx.fillText(`TARGET: ${detection.categories[0].categoryName.toUpperCase()}`, originX, originY - 5);
+    }
+
+    drawPersonLabels(landmarks, index, isLookingAway, color) {
+        const topLandmark = landmarks[10];
+        const x = topLandmark.x * this.canvasElement.width;
+        const y = topLandmark.y * this.canvasElement.height - 60;
+
+        this.canvasCtx.fillStyle = color;
+        this.canvasCtx.font = 'bold 10px Orbitron';
+        this.canvasCtx.textAlign = 'center';
+        this.canvasCtx.fillText(`AGENT_00${index + 1}`, x, y - 10);
+
+        this.canvasCtx.font = 'bold 14px Rajdhani';
+        if (isLookingAway) {
+            const boxW = 120;
+            const boxH = 24;
+            this.canvasCtx.fillStyle = '#ef4444';
+            this.canvasCtx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
+            this.canvasCtx.fillStyle = '#ffffff';
+            this.canvasCtx.fillText('⚠ FOCUS BROKEN', x, y + 5);
+        } else {
+            this.canvasCtx.fillText('✓ SECURED', x, y + 5);
+        }
     }
 
     drawPersonBrackets(landmarks, color, isDistracted) {

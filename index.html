@@ -40,31 +40,41 @@
                 <span class="text-red-500">v2.8</span>
             </h2>
 
-            <div class="text-left bg-black/40 rounded-2xl p-6 mb-8 border border-white/5 space-y-4">
-                <h3 class="text-xs font-black text-red-500 uppercase tracking-widest border-b border-red-500/20 pb-2">
-                    Proctoring Protocols</h3>
-                <ul class="text-sm text-slate-300 space-y-3 font-medium">
-                    <li class="flex items-start gap-3">
-                        <span class="text-red-500 mt-1">•</span>
-                        <span>**Object Detection Active**: Any unauthorized devices (phones, tablets) will trigger
-                            immediate
-                            termination.</span>
-                    </li>
-                    <li class="flex items-start gap-3">
-                        <span class="text-red-500 mt-1">•</span>
-                        <span>**Gaze Analysis**: Maintain consistent screen focus. Repeated gaze deviation is
-                            logged.</span>
-                    </li>
-                    <li class="flex items-start gap-3">
-                        <span class="text-red-500 mt-1">•</span>
-                        <span>**Environment Check**: Classroom detection is active. Multi-person presence is monitored
-                            but allowed.</span>
-                    </li>
-                    <li class="flex items-start gap-3">
-                        <span class="text-red-500 mt-1">•</span>
-                        <span>**Secure Feed**: Your session is processed locally and securely.</span>
-                    </li>
-                </ul>
+            <div class="text-left bg-black/40 rounded-2xl p-6 mb-8 border border-white/5 space-y-6">
+                <!-- DIAGNOSTICS -->
+                <div class="space-y-3">
+                    <h3
+                        class="text-[10px] font-black text-red-500 uppercase tracking-widest border-b border-red-500/20 pb-2 flex justify-between">
+                        Hardware Diagnostics <span id="diagStatus" class="animate-pulse">STANDBY</span>
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3 text-[10px] font-bold uppercase tracking-tighter">
+                        <div id="check-camera" class="flex items-center gap-2 text-slate-500"><span
+                                class="w-1.5 h-1.5 rounded-full bg-slate-700"></span> Visual Sensor</div>
+                        <div id="check-mic" class="flex items-center gap-2 text-slate-500"><span
+                                class="w-1.5 h-1.5 rounded-full bg-slate-700"></span> Audio Array</div>
+                        <div id="check-models" class="flex items-center gap-2 text-slate-500"><span
+                                class="w-1.5 h-1.5 rounded-full bg-slate-700"></span> Neural Engines</div>
+                        <div id="check-network" class="flex items-center gap-2 text-slate-500"><span
+                                class="w-1.5 h-1.5 rounded-full bg-slate-700"></span> Secure Link</div>
+                    </div>
+                </div>
+
+                <!-- PROTOCOLS -->
+                <div class="space-y-3">
+                    <h3
+                        class="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-white/10 pb-2">
+                        Proctoring Protocols</h3>
+                    <ul class="text-[11px] text-slate-400 space-y-2 font-medium">
+                        <li class="flex items-start gap-2">
+                            <span class="text-red-500">•</span> **AI Object Targeting**: Forbidden devices flagged
+                            instantly.
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="text-red-500">•</span> **Gaze/Identity Analysis**: Multi-person tracking
+                            active.
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <button id="requestPermissionBtn"
@@ -178,8 +188,14 @@
                 <div class="glass-panel p-3 rounded-[3rem] relative shadow-[0_0_80px_rgba(0,0,0,0.6)]">
                     <div id="videoFrame" class="video-container neon-border-cyan">
                         <div class="scanline"></div>
+                        <div class="grid-overlay"></div>
                         <video id="input_video" playsinline></video>
                         <canvas id="output_canvas"></canvas>
+
+                        <!-- AUDIO_VISUALIZER -->
+                        <div class="absolute bottom-6 left-6 right-6 h-12 pointer-events-none opacity-60">
+                            <canvas id="audio_visualizer" class="w-full h-full"></canvas>
+                        </div>
 
                         <!-- ALERT_HUD -->
                         <div id="alertOverlay"

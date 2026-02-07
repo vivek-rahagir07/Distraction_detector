@@ -92,6 +92,43 @@ body {
 }
 
 /* FX_ENGINE */
+.grid-overlay {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(to right, rgba(0, 243, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 243, 255, 0.05) 1px, transparent 1px);
+    background-size: 30px 30px;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.diag-item-ok {
+    color: var(--neon-green) !important;
+}
+
+.diag-item-ok span {
+    background-color: var(--neon-green) !important;
+    box-shadow: 0 0 10px var(--neon-green);
+}
+
+.diag-item-err {
+    color: var(--neon-red) !important;
+    animation: flash 1s infinite;
+}
+
+@keyframes flash {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
 .status-pulse {
     animation: pulse 2s infinite ease-in-out;
 }
