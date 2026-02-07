@@ -51,6 +51,11 @@ class FocusSentinel {
         this.analyser = null;
         this.lastObjectResults = null;
 
+        // INVIGILATION_STATE
+        this.riskIndex = 0;
+        this.isInducting = false;
+        this.tabViolations = 0;
+
         // MEDIAPIPE_INIT
         this.faceMesh = new FaceMesh({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
@@ -118,6 +123,13 @@ class FocusSentinel {
         this.pomoResetBtn.addEventListener('click', () => this.resetPomo());
 
         document.getElementById('downloadLog').addEventListener('click', () => this.downloadSessionData());
+
+        // TAB_MONITORING
+        window.addEventListener('blur', () => this.handleTabViolation('BROWSER_UNFOCUSED'));
+        window.addEventListener('focus', () => this.addLog('BROWSER_RE-FOCUSED', 'success'));
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this.handleTabViolation('WINDOW_HIDDEN');
+        });
 
         this.initChart();
         this.runDiagnostics();
@@ -215,37 +227,68 @@ class FocusSentinel {
     }
 
     async startSystem() {
-        const btnText = this.requestBtn.querySelector('span');
-        btnText.innerText = "AUTHENTICATING...";
+        if (this.isInducting) return;
+        const btnMainText = document.getElementById('btnMainText');
+        btnMainText.innerText = "AUTHENTICATING...";
         this.requestBtn.disabled = true;
 
         try {
             await this.camera.start();
             await this.startAudioAnalysis();
-            this.isActive = true;
-            this.setupOverlay.classList.add('hidden');
-            this.stopBtn.classList.remove('hidden');
-            this.updateStatus("SECURED", "border-red-500 text-red-500 bg-red-500/10", "bg-red-500");
-            this.startTimer();
 
-            this.canvasElement.width = this.videoElement.videoWidth || 640;
-            this.canvasElement.height = this.videoElement.videoHeight || 480;
-
-            if (this.audioVisualizer) {
-                this.audioVisualizer.width = 600;
-                this.audioVisualizer.height = 100;
-            }
-
-            this.addLog("PROTOCOLS_ENGAGED", "success");
-            this.startPomo(); // Start monitoring immediately
+            // Start Induction Phase
+            this.startInduction();
         } catch (err) {
             console.error(err);
             const errorMsg = document.getElementById('errorMessage');
             errorMsg.innerText = "SECURITY_ERR: ACCESS_DENIED";
             errorMsg.classList.remove('hidden');
-            btnText.innerText = "RE-INITIALIZE";
+            btnMainText.innerText = "RE-INITIALIZE";
             this.requestBtn.disabled = false;
         }
+    }
+
+    async startInduction() {
+        this.isInducting = true;
+        document.querySelector('.text-left.bg-black\\/40').classList.add('hidden');
+        document.getElementById('inductionPhase').classList.remove('hidden');
+
+        let progress = 0;
+        const progressBar = document.getElementById('inductionProgress');
+
+        this.playSuccess();
+        this.addLog("BIOMETRIC_INDUCTION_STARTED", "info");
+
+        const inductionInterval = setInterval(() => {
+            progress += 2;
+            progressBar.style.width = `${progress}%`;
+
+            if (progress >= 100) {
+                clearInterval(inductionInterval);
+                this.finishSystemActivation();
+            }
+        }, 100);
+    }
+
+    finishSystemActivation() {
+        this.isInducting = false;
+        this.isActive = true;
+        this.setupOverlay.classList.add('hidden');
+        this.stopBtn.classList.remove('hidden');
+        this.updateStatus("SECURED", "border-red-500 text-red-500 bg-red-500/10", "bg-red-500");
+        this.startTimer();
+
+        this.canvasElement.width = this.videoElement.videoWidth || 640;
+        this.canvasElement.height = this.videoElement.videoHeight || 480;
+
+        if (this.audioVisualizer) {
+            this.audioVisualizer.width = 600;
+            this.audioVisualizer.height = 100;
+        }
+
+        this.addLog("IDENTITY_LOCKED_SECURE", "success");
+        this.playSuccess();
+        this.startPomo();
     }
 
     async startAudioAnalysis() {
@@ -321,18 +364,19 @@ class FocusSentinel {
 
         if (faceCount > 0) {
             results.multiFaceLandmarks.forEach((landmarks, index) => {
-                const isLookingAway = this.checkLookingAway(landmarks);
-                if (isLookingAway) distractedCount++;
+                const distractionType = this.checkLookingAway(landmarks);
+                const isDistracted = distractionType !== null;
+                if (isDistracted) distractedCount++;
 
-                const color = isLookingAway ? '#ef4444' : '#22c55e';
+                const color = isDistracted ? '#ef4444' : '#22c55e';
                 drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: `${color}10`, lineWidth: 0.5 });
-                this.drawPersonBrackets(landmarks, color, isLookingAway);
-                this.drawPersonLabels(landmarks, index, isLookingAway, color);
+                this.drawPersonBrackets(landmarks, color, isDistracted);
+                this.drawPersonLabels(landmarks, index, distractionType, color);
             });
 
             if (distractedCount > 0) {
                 this.handleViolation("GAZE_DEV");
-                this.updateUIForDistraction(true, distractedCount > 1 ? "MULTIPLE_DISTRACTIONS" : "GAZE_DEVIATION");
+                this.updateUIForDistraction(true, distractedCount > 1 ? "MULTIPLE_GAZE_DEV" : "SINGLE_GAZE_DEV");
             } else {
                 this.framesFocused++;
                 this.updateUIForDistraction(false);
@@ -361,7 +405,7 @@ class FocusSentinel {
         ctx.fillText(`TARGET: ${detection.categories[0].categoryName.toUpperCase()}`, originX, originY - 5);
     }
 
-    drawPersonLabels(landmarks, index, isLookingAway, color) {
+    drawPersonLabels(landmarks, index, distractionType, color) {
         const topLandmark = landmarks[10];
         const x = topLandmark.x * this.canvasElement.width;
         const y = topLandmark.y * this.canvasElement.height - 60;
@@ -372,13 +416,18 @@ class FocusSentinel {
         this.canvasCtx.fillText(`AGENT_00${index + 1}`, x, y - 10);
 
         this.canvasCtx.font = 'bold 14px Rajdhani';
-        if (isLookingAway) {
-            const boxW = 120;
+        if (distractionType) {
+            const boxW = 160;
             const boxH = 24;
             this.canvasCtx.fillStyle = '#ef4444';
             this.canvasCtx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
             this.canvasCtx.fillStyle = '#ffffff';
-            this.canvasCtx.fillText('⚠ FOCUS BROKEN', x, y + 5);
+
+            let label = '⚠ FOCUS BROKEN';
+            if (distractionType === 'DESK_GAZE') label = '⚠ DESK_GAZE_DETECTED';
+            if (distractionType === 'SIDE_GAZE') label = '⚠ SIDE_GAZE_DETECTED';
+
+            this.canvasCtx.fillText(label, x, y + 5);
         } else {
             this.canvasCtx.fillText('✓ SECURED', x, y + 5);
         }
@@ -447,7 +496,6 @@ class FocusSentinel {
         const nose = landmarks[1];
 
         // Horizontal Ratio (X)
-        // 0 = Looking far left, 1 = Looking far right
         const eyeDist = rightEye.x - leftEye.x;
         const noseRelativeX = (nose.x - leftEye.x) / eyeDist;
 
@@ -460,15 +508,16 @@ class FocusSentinel {
         // Depth Check (Z) - detects extreme head turn
         const zRatio = Math.abs(leftEye.z - rightEye.z) / eyeDist;
 
-        // Thresholds:
-        // X: [0.35, 0.65] - tighter horizontal focus
-        // Y: [0.35, 0.65] - tighter vertical focus
-        // Z: < 0.35 - head rotation
         const isXAway = noseRelativeX < 0.35 || noseRelativeX > 0.65;
         const isYAway = noseRelativeY < 0.35 || noseRelativeY > 0.65;
         const isZAway = zRatio > 0.35;
 
-        return isXAway || isYAway || isZAway;
+        if (isXAway || isZAway) return 'SIDE_GAZE';
+        if (isYAway) {
+            return (noseRelativeY > 0.65) ? 'DESK_GAZE' : 'HIGH_GAZE';
+        }
+
+        return null;
     }
 
     initAudio() {
@@ -513,6 +562,33 @@ class FocusSentinel {
             this.videoFrame.classList.add('alert-shake');
             setTimeout(() => this.videoFrame.classList.remove('alert-shake'), 500);
             this.playAlert();
+            this.updateRisk(15); // Increase risk by 15% per violation
+        }
+    }
+
+    handleTabViolation(type) {
+        if (!this.isActive) return;
+        this.tabViolations++;
+        this.handleViolation(`${type}_ID_${this.tabViolations}`);
+        this.addLog(`SECURITY_BREACH: ${type} - TAB_RECORDED`, "alert");
+    }
+
+    updateRisk(amount) {
+        this.riskIndex = Math.min(100, this.riskIndex + amount);
+        const meter = document.getElementById('riskMeter');
+        const label = document.getElementById('riskLabel');
+
+        meter.style.width = `${this.riskIndex}%`;
+
+        if (this.riskIndex > 70) {
+            label.innerText = 'CRITICAL_RISK';
+            label.className = 'text-[9px] font-mono text-red-500 animate-pulse';
+        } else if (this.riskIndex > 30) {
+            label.innerText = 'MODERATE_RISK';
+            label.className = 'text-[9px] font-mono text-amber-500';
+        } else {
+            label.innerText = 'LOW_RISK';
+            label.className = 'text-[9px] font-mono text-emerald-500';
         }
     }
 
