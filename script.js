@@ -229,15 +229,32 @@ class FocusSentinel {
                 // Draw label above head
                 const topLandmark = landmarks[10];
                 const x = topLandmark.x * this.canvasElement.width;
-                const y = topLandmark.y * this.canvasElement.height - 40;
+                const y = topLandmark.y * this.canvasElement.height - 60;
 
+                // ID Tag
                 this.canvasCtx.fillStyle = color;
                 this.canvasCtx.font = 'bold 10px Orbitron';
                 this.canvasCtx.textAlign = 'center';
-                this.canvasCtx.fillText(`GUARD_ID: 00${index + 1}`, x, y - 12);
+                this.canvasCtx.fillText(`AGENT_00${index + 1}`, x, y - 10);
 
+                // Status Badge
                 this.canvasCtx.font = 'bold 14px Rajdhani';
-                this.canvasCtx.fillText(isLookingAway ? '⚠ DISTRACTED' : '✓ FOCUSED', x, y);
+                if (isLookingAway) {
+                    // Draw Alert Badge
+                    const boxW = 120;
+                    const boxH = 24;
+                    this.canvasCtx.fillStyle = '#ef4444';
+                    this.canvasCtx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
+                    this.canvasCtx.fillStyle = '#ffffff';
+                    this.canvasCtx.fillText('⚠ FOCUS BROKEN', x, y + 5);
+
+                    // Add secondary detail
+                    this.canvasCtx.font = 'bold 8px Orbitron';
+                    this.canvasCtx.fillStyle = '#ef4444';
+                    this.canvasCtx.fillText('GAZE_DEVIATION_DETECTED', x, y + 25);
+                } else {
+                    this.canvasCtx.fillText('✓ SECURED', x, y + 5);
+                }
             });
 
             if (distractedCount > 0) {
@@ -397,6 +414,7 @@ class FocusSentinel {
         if (isDistracted) {
             this.updateStatus(customState || "SECURITY_ALERT", "border-red-500 text-red-500 bg-red-500/10", "bg-red-500");
             this.alertOverlay.style.opacity = "1";
+            this.alertOverlay.style.borderColor = "rgba(239, 68, 68, 0.4)";
             this.videoFrame.classList.add('neon-border-red');
             this.videoFrame.classList.remove('neon-border-green', 'neon-border-cyan');
             this.focusStateEl.innerText = customState || "INTEGRITY_COMPROMISED";
@@ -405,6 +423,7 @@ class FocusSentinel {
         } else {
             this.updateStatus("SECURED", "border-emerald-500 text-emerald-400 bg-emerald-500/10", "bg-emerald-500");
             this.alertOverlay.style.opacity = "0";
+            this.alertOverlay.style.borderColor = "rgba(239, 68, 68, 0)";
             this.videoFrame.classList.add('neon-border-green');
             this.videoFrame.classList.remove('neon-border-red', 'neon-border-cyan');
             this.focusStateEl.innerText = "COMPLIANT";
