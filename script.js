@@ -56,6 +56,7 @@ class FocusSentinel {
         this.isInducting = false;
         this.tabViolations = 0;
         this.agentFocusLog = {}; // Store persistent focus data for each agent ID
+        this.proctorMode = 'digital'; // 'digital' or 'hybrid'
 
         // MEDIAPIPE_INIT
         this.faceMesh = new FaceMesh({
@@ -124,6 +125,26 @@ class FocusSentinel {
         this.pomoResetBtn.addEventListener('click', () => this.resetPomo());
 
         document.getElementById('downloadLog').addEventListener('click', () => this.downloadSessionData());
+
+        // PROCTOR_MODE_SELECTORS
+        const btnDigital = document.getElementById('modeDigital');
+        const btnHybrid = document.getElementById('modeHybrid');
+
+        btnDigital.addEventListener('click', () => {
+            this.proctorMode = 'digital';
+            btnDigital.classList.add('active', 'border-cyan-500/30', 'bg-cyan-500/10');
+            btnHybrid.classList.remove('active', 'border-cyan-500/30', 'bg-cyan-500/10');
+            btnDigital.classList.remove('opacity-60');
+            btnHybrid.classList.add('opacity-60');
+        });
+
+        btnHybrid.addEventListener('click', () => {
+            this.proctorMode = 'hybrid';
+            btnHybrid.classList.add('active', 'border-cyan-500/30', 'bg-cyan-500/10');
+            btnDigital.classList.remove('active', 'border-cyan-500/30', 'bg-cyan-500/10');
+            btnHybrid.classList.remove('opacity-60');
+            btnDigital.classList.add('opacity-60');
+        });
 
         // TAB_MONITORING
         window.addEventListener('blur', () => this.handleTabViolation('BROWSER_UNFOCUSED'));
@@ -370,8 +391,14 @@ class FocusSentinel {
                     this.agentFocusLog[agentID] = { active: 0, focused: 0 };
                 }
 
-                const distractionType = this.checkLookingAway(landmarks);
-                const isDistracted = distractionType !== null;
+                let distractionType = this.checkLookingAway(landmarks);
+
+                // Contextual Logic: Paper Exams
+                if (distractionType === 'DESK_GAZE' && this.proctorMode === 'hybrid') {
+                    distractionType = 'WRITING'; // Label it as writing activity
+                }
+
+                const isDistracted = distractionType !== null && distractionType !== 'WRITING';
 
                 this.agentFocusLog[agentID].active++;
                 if (!isDistracted) {
@@ -381,7 +408,7 @@ class FocusSentinel {
                     distractedCount++;
                 }
 
-                const color = isDistracted ? '#ef4444' : '#22c55e';
+                const color = isDistracted ? '#ef4444' : (distractionType === 'WRITING' ? '#fbbf24' : '#22c55e');
                 drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: `${color}10`, lineWidth: 0.5 });
                 this.drawPersonBrackets(landmarks, color, isDistracted);
 
@@ -410,16 +437,25 @@ class FocusSentinel {
     drawObjectBracket(detection) {
         const { originX, originY, width, height } = detection.boundingBox;
         const ctx = this.canvasCtx;
+        const category = detection.categories[0].categoryName.toUpperCase();
 
         ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 4;
+        ctx.setLineDash([10, 5]);
         ctx.strokeRect(originX, originY, width, height);
         ctx.setLineDash([]);
 
+        // Pulsing glow for objects
+        ctx.shadowBlur = Math.sin(Date.now() / 100) * 10 + 10;
+        ctx.shadowColor = '#ef4444';
+        ctx.strokeRect(originX, originY, width, height);
+        ctx.shadowBlur = 0;
+
         ctx.fillStyle = '#ef4444';
-        ctx.font = 'bold 10px Orbitron';
-        ctx.fillText(`TARGET: ${detection.categories[0].categoryName.toUpperCase()}`, originX, originY - 5);
+        ctx.font = 'black 12px Orbitron';
+        ctx.fillRect(originX, originY - 25, width, 25);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`⚠ FORBIDDEN_${category}`, originX + 5, originY - 8);
     }
 
     drawPersonLabels(landmarks, agentID, distractionType, focusPercentage, color) {
@@ -436,13 +472,14 @@ class FocusSentinel {
         if (distractionType) {
             const boxW = 160;
             const boxH = 24;
-            this.canvasCtx.fillStyle = '#ef4444';
+            this.canvasCtx.fillStyle = distractionType === 'WRITING' ? '#fbbf24' : '#ef4444';
             this.canvasCtx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
-            this.canvasCtx.fillStyle = '#ffffff';
+            this.canvasCtx.fillStyle = distractionType === 'WRITING' ? '#000' : '#ffffff';
 
             let label = '⚠ FOCUS BROKEN';
             if (distractionType === 'DESK_GAZE') label = '⚠ DESK_GAZE_DETECTED';
             if (distractionType === 'SIDE_GAZE') label = '⚠ SIDE_GAZE_DETECTED';
+            if (distractionType === 'WRITING') label = '✍ WRITING_DETECTED';
 
             this.canvasCtx.fillText(label, x, y + 5);
         } else {

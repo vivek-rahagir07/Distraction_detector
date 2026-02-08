@@ -41,6 +41,29 @@
             </h2>
 
             <div class="text-left bg-black/40 rounded-2xl p-6 mb-8 border border-white/5 space-y-6">
+                <!-- PROCTORING_MODE_SELECTOR -->
+                <div class="space-y-3">
+                    <h3
+                        class="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-white/10 pb-2">
+                        Mission Parameters</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="modeDigital"
+                            class="proctor-mode-btn active p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-center transition-all duration-300">
+                            <div class="text-[10px] font-black text-cyan-400 uppercase tracking-tighter mb-1">Digital
+                                Mode</div>
+                            <div class="text-[8px] text-slate-500 font-bold uppercase leading-tight">Focus on screen.
+                                Gaze deviation flagged.</div>
+                        </button>
+                        <button id="modeHybrid"
+                            class="proctor-mode-btn p-3 rounded-xl border border-white/5 bg-black/20 text-center transition-all duration-300 opacity-60 hover:opacity-100">
+                            <div class="text-[10px] font-black text-slate-400 uppercase tracking-tighter mb-1">Hybrid
+                                Mode</div>
+                            <div class="text-[8px] text-slate-500 font-bold uppercase leading-tight">Paper allowed.
+                                Writing detected.</div>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- DIAGNOSTICS -->
                 <div class="space-y-3">
                     <h3

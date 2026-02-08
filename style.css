@@ -91,6 +91,17 @@ body {
     transform: scaleX(-1);
 }
 
+.proctor-mode-btn.active {
+    border-color: var(--neon-cyan) !important;
+    background-color: rgba(0, 243, 255, 0.1) !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+}
+
+.proctor-mode-btn.active div {
+    color: var(--neon-cyan) !important;
+}
+
 /* FX_ENGINE */
 .grid-overlay {
     position: absolute;
