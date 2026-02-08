@@ -55,6 +55,7 @@ class FocusSentinel {
         this.riskIndex = 0;
         this.isInducting = false;
         this.tabViolations = 0;
+        this.agentFocusLog = {}; // Store persistent focus data for each agent ID
 
         // MEDIAPIPE_INIT
         this.faceMesh = new FaceMesh({
@@ -364,21 +365,37 @@ class FocusSentinel {
 
         if (faceCount > 0) {
             results.multiFaceLandmarks.forEach((landmarks, index) => {
+                const agentID = `AGENT_00${index + 1}`;
+                if (!this.agentFocusLog[agentID]) {
+                    this.agentFocusLog[agentID] = { active: 0, focused: 0 };
+                }
+
                 const distractionType = this.checkLookingAway(landmarks);
                 const isDistracted = distractionType !== null;
-                if (isDistracted) distractedCount++;
+
+                this.agentFocusLog[agentID].active++;
+                if (!isDistracted) {
+                    this.agentFocusLog[agentID].focused++;
+                    this.framesFocused++; // Global metric update
+                } else {
+                    distractedCount++;
+                }
 
                 const color = isDistracted ? '#ef4444' : '#22c55e';
                 drawConnectors(this.canvasCtx, landmarks, FACEMESH_TESSELATION, { color: `${color}10`, lineWidth: 0.5 });
                 this.drawPersonBrackets(landmarks, color, isDistracted);
-                this.drawPersonLabels(landmarks, index, distractionType, color);
+
+                const focusPercentage = Math.round((this.agentFocusLog[agentID].focused / this.agentFocusLog[agentID].active) * 100);
+                this.drawPersonLabels(landmarks, agentID, distractionType, focusPercentage, color);
+
+                // Advanced Ocular Tracking
+                this.drawOcularOverlay(landmarks, isDistracted);
             });
 
             if (distractedCount > 0) {
                 this.handleViolation("GAZE_DEV");
                 this.updateUIForDistraction(true, distractedCount > 1 ? "MULTIPLE_GAZE_DEV" : "SINGLE_GAZE_DEV");
             } else {
-                this.framesFocused++;
                 this.updateUIForDistraction(false);
             }
         } else {
@@ -405,7 +422,7 @@ class FocusSentinel {
         ctx.fillText(`TARGET: ${detection.categories[0].categoryName.toUpperCase()}`, originX, originY - 5);
     }
 
-    drawPersonLabels(landmarks, index, distractionType, color) {
+    drawPersonLabels(landmarks, agentID, distractionType, focusPercentage, color) {
         const topLandmark = landmarks[10];
         const x = topLandmark.x * this.canvasElement.width;
         const y = topLandmark.y * this.canvasElement.height - 60;
@@ -413,7 +430,7 @@ class FocusSentinel {
         this.canvasCtx.fillStyle = color;
         this.canvasCtx.font = 'bold 10px Orbitron';
         this.canvasCtx.textAlign = 'center';
-        this.canvasCtx.fillText(`AGENT_00${index + 1}`, x, y - 10);
+        this.canvasCtx.fillText(`${agentID} | FC:${focusPercentage}%`, x, y - 10);
 
         this.canvasCtx.font = 'bold 14px Rajdhani';
         if (distractionType) {
@@ -431,6 +448,43 @@ class FocusSentinel {
         } else {
             this.canvasCtx.fillText('✓ SECURED', x, y + 5);
         }
+    }
+
+    drawOcularOverlay(landmarks, isDistracted) {
+        // Iris landmark indices: Left [468-472], Right [473-477]
+        // Iris center: Left 468, Right 473
+        const leftIris = landmarks[468];
+        const rightIris = landmarks[473];
+        const ctx = this.canvasCtx;
+        const color = isDistracted ? '#ef4444' : '#00f3ff';
+
+        [leftIris, rightIris].forEach(iris => {
+            const x = iris.x * this.canvasElement.width;
+            const y = iris.y * this.canvasElement.height;
+
+            // Neon pupil crosshair
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x - 6, y);
+            ctx.lineTo(x + 6, y);
+            ctx.moveTo(x, y - 6);
+            ctx.lineTo(x, y + 6);
+            ctx.stroke();
+
+            // Directional Gaze Vector (subtle line showing depth/view)
+            const zOffset = (iris.z * 100);
+            ctx.setLineDash([2, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x, y - (isDistracted ? 40 : 20)); // Upward vector for focus viz
+            ctx.stroke();
+            ctx.setLineDash([]);
+        });
     }
 
     drawPersonBrackets(landmarks, color, isDistracted) {
